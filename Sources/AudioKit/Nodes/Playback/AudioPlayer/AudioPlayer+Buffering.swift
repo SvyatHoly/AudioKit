@@ -30,10 +30,8 @@ extension AudioPlayer {
             endFrame = AVAudioFramePosition(revEndTime * sampleRate)
         }
 
-        let updateNeeded = force ||
-            buffer == nil ||
-            startFrame != startingFrame ||
-            endFrame != endingFrame
+        let updateNeeded = force
+        || buffer == nil
 
         guard updateNeeded else {
             // Log("Data is unchanged, no buffer update is needed")

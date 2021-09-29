@@ -689,7 +689,7 @@ open class AppleSequencer: NSObject {
     }
 
     ///  Dispose of tracks associated with sequence
-    func removeTracks() {
+    public func removeTracks() {
         if let existingSequence = sequence {
             var tempoTrack: MusicTrack?
             MusicSequenceGetTempoTrack(existingSequence, &tempoTrack)
