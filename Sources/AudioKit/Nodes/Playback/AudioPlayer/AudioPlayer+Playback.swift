@@ -68,6 +68,10 @@ extension AudioPlayer {
         playerNode.play()
     }
 
+    public func prepare(withFrameCount: AVAudioFrameCount) {
+        playerNode.prepare(withFrameCount: withFrameCount)
+    }
+
     /// Gets the accurate playhead time regardless of seeking and pausing
     /// Can't be relied on if playerNode has its playstate modified directly
     public func getCurrentTime() -> TimeInterval {
