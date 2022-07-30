@@ -12,6 +12,9 @@ open class NodeRecorder: NSObject {
     /// True if we are recording.
     public private(set) var isRecording = false
 
+    /// True if we are paused
+    public private(set) var isPaused = false
+
     /// An optional duration for the recording to auto-stop when reached
     open var durationToRecord: Double = 0
 
@@ -41,7 +44,10 @@ open class NodeRecorder: NSObject {
     /// return the AVAudioFile for reading
     open var audioFile: AVAudioFile? {
         do {
-            guard let url = internalAudioFile?.url else { return nil }
+            if internalAudioFile != nil {
+                closeFile(file: &internalAudioFile)
+            }
+            guard let url = recordedFileURL else { return nil }
             return try AVAudioFile(forReading: url)
 
         } catch let error as NSError {
@@ -50,7 +56,20 @@ open class NodeRecorder: NSObject {
         }
     }
 
-    private static var tmpFiles = [URL]()
+    /// Directory audio files will be written to
+    private var fileDirectoryURL: URL
+
+    private var shouldCleanupRecordings: Bool
+
+    private var recordedFileURL: URL?
+
+    private static var recordedFiles = [URL]()
+
+    /// Callback type
+    public typealias RawAudioDataHandler = ([Float]) -> Void
+
+    /// Callback of incoming audio floating point values for monitoring purposes
+    public var rawDataTapHandler: RawAudioDataHandler?
 
     // MARK: - Initialization
 
@@ -60,58 +79,81 @@ open class NodeRecorder: NSObject {
     ///
     /// - Parameters:
     ///   - node: Node to record from
-    ///   - file: Audio file to record to
+    ///   - fileDirectoryPath: Directory to write audio files to
     ///   - bus: Integer index of the bus to use
+    ///   - shouldCleanupRecordings: Determines if recorded files are deleted upon deinit (default = true)
+    ///   - rawDataTapHandler: Raw audio data callback
     ///
     public init(node: Node,
-                file: AVAudioFile? = NodeRecorder.createTempFile(),
-                bus: Int = 0) throws {
+                fileDirectoryURL: URL? = nil,
+                bus: Int = 0,
+                shouldCleanupRecordings: Bool = true,
+                rawDataTapHandler: RawAudioDataHandler? = nil) throws {
         self.node = node
+        self.fileDirectoryURL = fileDirectoryURL ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        self.shouldCleanupRecordings = shouldCleanupRecordings
+        self.rawDataTapHandler = rawDataTapHandler
         super.init()
 
-        guard let file = file else {
-            Log("Error, no file to write to")
-            return
-        }
-
-        do {
-            // We initialize AVAudioFile for writing (and check that we can write to)
-            internalAudioFile = try AVAudioFile(forWriting: file.url,
-                                                settings: file.fileFormat.settings)
-        } catch let error as NSError {
-            Log("Error: cannot write to", file.url)
-            throw error
-        }
+        createNewFile()
 
         self.bus = bus
     }
 
+    deinit {
+        if shouldCleanupRecordings { NodeRecorder.removeRecordedFiles() }
+    }
+
     // MARK: - Methods
 
-    /// Returns a CAF file in the NSTemporaryDirectory suitable for writing to via Settings.audioFormat
-    public static func createTempFile() -> AVAudioFile? {
-        let filename = UUID().uuidString + ".caf"
-        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(filename)
+    /// Use Date and Time as Filename
+    private static func createDateFileName() -> String {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd HH-mm-ss.SSSS"
+        return dateFormatter.string(from: Date())
+    }
+
+    /// Open file a for recording
+    /// - Parameter file: Reference to the file you want to record to
+    /// Has to be optional because the file will be set to `nil` after recording.
+    public func openFile(file: inout AVAudioFile?) {
+        internalAudioFile = file
+        // Close the file object passed in, try returning another one for reading after
+        closeFile(file: &file)
+    }
+
+    /// Close file after recording
+    /// - Parameter file: Reference to the file you want to close
+    public func closeFile(file: inout AVAudioFile?) {
+        if let fileURL = file?.url {
+            // Keep track of file URL before closing
+            recordedFileURL = fileURL
+        }
+        file = nil
+    }
+
+    /// Returns a CAF file in specified directory suitable for writing to via Settings.audioFormat
+    public static func createAudioFile(fileDirectoryURL: URL = URL(fileURLWithPath: NSTemporaryDirectory())) -> AVAudioFile? {
+        let filename = createDateFileName() + ".caf"
+        let url = fileDirectoryURL.appendingPathComponent(filename)
         var settings = Settings.audioFormat.settings
         settings[AVLinearPCMIsNonInterleaved] = NSNumber(value: false)
 
         Log("Creating temp file at", url)
-        guard let tmpFile = try? AVAudioFile(forWriting: url,
-                                             settings: settings,
-                                             commonFormat: Settings.audioFormat.commonFormat,
-                                             interleaved: true) else { return nil }
+        guard let audioFile = try? AVAudioFile(forWriting: url,
+                                               settings: settings) else { return nil }
 
-        tmpFiles.append(url)
-        return tmpFile
+        recordedFiles.append(url)
+        return audioFile
     }
 
-    /// When done with this class, remove any temp files that were created with createTempFile()
-    public static func removeTempFiles() {
-        for url in NodeRecorder.tmpFiles {
+    /// When done with this class, remove any audio files that were created with createAudioFile()
+    public static func removeRecordedFiles() {
+        for url in NodeRecorder.recordedFiles {
             try? FileManager.default.removeItem(at: url)
             Log("𝗫 Deleted tmp file at", url)
         }
-        NodeRecorder.tmpFiles.removeAll()
+        NodeRecorder.recordedFiles.removeAll()
     }
 
     /// Start recording
@@ -121,11 +163,15 @@ open class NodeRecorder: NSObject {
             return
         }
 
+        if internalAudioFile == nil {
+            createNewFile()
+        }
+
         if let path = internalAudioFile?.url.path, !FileManager.default.fileExists(atPath: path) {
-            // record to new tmp file
-            if let tmpFile = NodeRecorder.createTempFile() {
-                internalAudioFile = try AVAudioFile(forWriting: tmpFile.url,
-                                                    settings: tmpFile.fileFormat.settings)
+            // record to new audio file
+            if let audioFile = NodeRecorder.createAudioFile(fileDirectoryURL: fileDirectoryURL) {
+                internalAudioFile = try AVAudioFile(forWriting: audioFile.url,
+                                                    settings: audioFile.fileFormat.settings)
             }
         }
 
@@ -158,17 +204,36 @@ open class NodeRecorder: NSObject {
         guard let internalAudioFile = internalAudioFile else { return }
 
         do {
-            recordBufferDuration = Double(buffer.frameLength) / Settings.sampleRate
-            try internalAudioFile.write(from: buffer)
+            if !isPaused {
+                recordBufferDuration = Double(buffer.frameLength) / Settings.sampleRate
+                try internalAudioFile.write(from: buffer)
 
-            // allow an optional timed stop
-            if durationToRecord != 0 && internalAudioFile.duration >= durationToRecord {
-                stop()
+                // allow an optional timed stop
+                if durationToRecord != 0 && internalAudioFile.duration >= durationToRecord {
+                    stop()
+                }
+
+                if rawDataTapHandler != nil {
+                    doHandleTapBlock(buffer: buffer)
+                }
             }
-
         } catch let error as NSError {
             Log("Write failed: error -> \(error.localizedDescription)")
         }
+    }
+
+    /// When a raw data tap handler is provided, we call it back with the recorded float values
+    private func doHandleTapBlock(buffer: AVAudioPCMBuffer) {
+        guard buffer.floatChannelData != nil else { return }
+
+        let offset = Int(buffer.frameCapacity - buffer.frameLength)
+        var data = [Float]()
+        if let channelData = buffer.floatChannelData?[0] {
+            for index in 0 ..< buffer.frameLength {
+                data.append(channelData[offset + Int(index)])
+            }
+        }
+        rawDataTapHandler?(data)
     }
 
     /// Stop recording
@@ -186,6 +251,21 @@ open class NodeRecorder: NSObject {
             usleep(delay)
         }
         node.avAudioNode.removeTap(onBus: bus)
+
+        // Unpause if paused
+        if isPaused {
+            isPaused = false
+        }
+    }
+
+    /// Pause recording
+    public func pause() {
+        isPaused = true
+    }
+
+    /// Resume recording
+    public func resume() {
+        isPaused = false
     }
 
     /// Reset the AVAudioFile to clear previous recordings
@@ -195,19 +275,18 @@ open class NodeRecorder: NSObject {
             stop()
         }
 
-        guard let internalAudioFile = internalAudioFile else { return }
+        guard let audioFile = audioFile else { return }
 
         // Delete the physical recording file
         let fileManager = FileManager.default
-        let settings = internalAudioFile.fileFormat.settings
-        let url = internalAudioFile.url
+        let settings = audioFile.fileFormat.settings
+        let url = audioFile.url
 
         do {
-            if let path = audioFile?.url.path {
-                try fileManager.removeItem(atPath: path)
-            }
+            let path = audioFile.url.path
+            try fileManager.removeItem(atPath: path)
         } catch let error as NSError {
-            Log("Error: Can't delete" + (audioFile?.url.lastPathComponent ?? "nil") + error.localizedDescription)
+            Log("Error: Can't delete" + (audioFile.url.lastPathComponent) + error.localizedDescription)
         }
 
         // Creates a blank new file
@@ -218,5 +297,14 @@ open class NodeRecorder: NSObject {
             Log("Error: Can't record to" + url.lastPathComponent)
             throw error
         }
+    }
+
+    /// Creates a new audio file for recording
+    public func createNewFile() {
+        if isRecording == true {
+            stop()
+        }
+
+        self.internalAudioFile = NodeRecorder.createAudioFile(fileDirectoryURL: self.fileDirectoryURL)
     }
 }

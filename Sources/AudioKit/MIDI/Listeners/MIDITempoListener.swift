@@ -26,7 +26,7 @@ public typealias BPMType = TimeInterval
 ///     let tempoListener = MIDITempoListener()
 ///     MIDI().addListener(tempoListener)
 ///
-/// Make your class a MIDITempoObserver and you will recieve callbacks when the BPM
+/// Make your class a MIDITempoObserver and you will receive callbacks when the BPM
 /// changes.
 ///
 ///     class YOURCLASS: MIDITempoObserver {
@@ -368,21 +368,15 @@ extension MIDITempoListener {
     }
 
     func midiClockActivityStarted() {
-        tempoObservers.forEach { (observer) in
-            observer.midiClockLeaderMode()
-        }
+        for observer in tempoObservers { observer.midiClockLeaderMode() }
     }
 
     func midiClockActivityStopped() {
-        tempoObservers.forEach { (observer) in
-            observer.midiClockLeaderEnabled()
-        }
+        for observer in tempoObservers { observer.midiClockLeaderEnabled() }
     }
 
     func receivedTempo(bpm: BPMType, label: String) {
-        tempoObservers.forEach { (observer) in
-            observer.receivedTempo(bpm: bpm, label: label)
-        }
+        for observer in tempoObservers { observer.receivedTempo(bpm: bpm, label: label) }
     }
 }
 

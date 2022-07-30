@@ -15,11 +15,27 @@ AudioKit is an audio synthesis, processing, and analysis platform for iOS, macOS
 
 ## Installation
 
-To add AudioKit to your Xcode project, select File -> Swift Packages -> Add Package Depedency. Enter `https://github.com/AudioKit/AudioKit` for the URL.  You can define which version range you want, or which branch to use, or even which exact commit you would like use. 
+### In Xcode 13:
+
+You can add AudioKit and any of the other AudioKit libraries using Collections
+
+1. Select File -> Add Packages...
+2. Click the `+` icon on the bottom left of the Collections sidebar on the left.
+3. Choose `Add Swift Package Collection` from the pop-up menu.
+4. In the `Add Package Collection` dialog box, enter `https://swiftpackageindex.com/AudioKit/collection.json` as the URL and click the "Load" button.
+5. It will warn you that the collection is not signed, but it is fine, click "Add Unsigned Collection".
+6. Now you can add any of the AudioKit Swift Packages you need and read about what they do, right from within Xcode.
+
+### In Xcode 11 & 12:
+
+To add AudioKit to your Xcode project
+
+1. Select File -> Swift Packages -> Add Package Dependency.
+2. Enter `https://github.com/AudioKit/AudioKit` for the URL.  You can define which version range you want, or which branch to use, or even which exact commit you would like use. 
 
 ## Documentation
 
-All AudioKit documentation is generated from this repository. The documentation that appear in the `docs` folder generate the [AudioKit.io Web Site](https://audiokit.io/).  API documentation appears on the [Github wiki](https://github.com/AudioKit/AudioKit/wiki).
+You can generate the documentation in XCode13+ by pulling down the Product menu and choosing "Build Documentation". It also appears on the [AudioKit.io Web Site](https://audiokit.io/) and the [Github wiki](https://github.com/AudioKit/AudioKit/wiki).
 
 ## Examples
 

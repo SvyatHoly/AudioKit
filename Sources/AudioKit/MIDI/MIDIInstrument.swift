@@ -47,11 +47,15 @@ open class MIDIInstrument: Node, MIDIListener, NamedNode {
                          name: String? = nil) {
         let cfName = (name ?? self.name) as CFString
         CheckError(MIDIDestinationCreateWithBlock(midiClient, cfName, &midiIn) { packetList, _ in
-            // While packetList is still valid, read events out.
-            let events = packetList.pointee.map( { MIDIEvent(packet: $0 )})
-            DispatchQueue.main.async {
-                for event in events {
-                    self.handle(event: event)
+            withUnsafePointer(to: packetList.pointee.packet) { packetPtr in
+                var p = packetPtr
+                for _ in 1...packetList.pointee.numPackets {
+                    for event in p.pointee {
+                        DispatchQueue.main.async {
+                            self.handle(event: event)
+                        }
+                    }
+                    p = UnsafePointer<MIDIPacket>(MIDIPacketNext(p))
                 }
             }
         })
@@ -70,7 +74,7 @@ open class MIDIInstrument: Node, MIDIListener, NamedNode {
     
     /// Handle MIDI commands that come in externally
     /// - Parameters:
-    ///   - noteNumber: MIDI Note Numbe
+    ///   - noteNumber: MIDI Note Number
     ///   - velocity: MIDI Velocity
     ///   - channel: MIDI Channel
     ///   - portID: Incoming MIDI Source
@@ -90,7 +94,7 @@ open class MIDIInstrument: Node, MIDIListener, NamedNode {
     
     /// Handle MIDI commands that come in externally
     /// - Parameters:
-    ///   - noteNumber: MIDI Note Numbe
+    ///   - noteNumber: MIDI Note Number
     ///   - velocity: MIDI Velocity
     ///   - channel: MIDI Channel
     ///   - portID: Incoming MIDI Source

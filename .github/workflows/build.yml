@@ -1,16 +1,16 @@
-# GitHub Actions for AudioKit: includes builds, tests and releases
+# GitHub Actions for AudioKit: includes builds, tests and docs
 name: CI
 
 on: [push, pull_request]
 env:
-  XCODE_VER: 12.4
+  XCODE_VER: latest-stable
 
 jobs:
   test:
     strategy:
       matrix:
-        xcode_version: ['12.4']
-    runs-on: macos-latest
+        xcode_version: ['13.1']
+    runs-on: macos-11
     env:
       DEVELOPER_DIR: /Applications/Xcode_${{ matrix.xcode_version }}.app
     steps:
@@ -24,7 +24,7 @@ jobs:
       - name: Run Tests (ASAN)
         run: |
           set -euo pipefail
-          xcodebuild -scheme AudioKit -enableAddressSanitizer YES test | xcpretty
+          xcodebuild -destination 'platform=OS X,arch=x86_64' -scheme AudioKit -enableAddressSanitizer YES test
 
   # Generate Wiki docs on release
   docs:

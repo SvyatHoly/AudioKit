@@ -22,6 +22,7 @@ open class BaseTap {
     }
 
     private var _input: Node
+    private var handleBlock: AVAudioNodeTapBlock?
 
     /// Input node to analyze
     public var input: Node {
@@ -73,34 +74,30 @@ open class BaseTap {
             Log("The tapped node isn't attached to the engine")
             return
         }
-
+        handleBlock = { [weak self] in self?.handleTapBlock(buffer: $0, at: $1) }
         input.avAudioNode.installTap(onBus: bus,
-                                           bufferSize: bufferSize,
-                                           format: nil,
-                                           block: handleTapBlock(buffer:at:))
+                                     bufferSize: bufferSize,
+                                     format: nil,
+                                     block: { [weak self] in self?.handleBlock?($0, $1) })
     }
 
-    /// Overide this method to handle Tap in derived class
+    /// Override this method to handle Tap in derived class
     /// - Parameters:
     ///   - buffer: Buffer to analyze
     ///   - time: Unused in this case
     private func handleTapBlock(buffer: AVAudioPCMBuffer, at time: AVAudioTime) {
-        // Call on the main thread so the client doesn't have to worry
-        // about thread safety.
         buffer.frameLength = bufferSize
-        DispatchQueue.main.async {
-            // Create trackers as needed.
-            self.lock()
-            guard self.isStarted == true else {
-                self.unlock()
-                return
-            }
-            self.doHandleTapBlock(buffer: buffer, at: time)
+        // Create trackers as needed.
+        self.lock()
+        guard self.isStarted == true else {
             self.unlock()
+            return
         }
+        self.doHandleTapBlock(buffer: buffer, at: time)
+        self.unlock()
     }
 
-    /// Overide this method to handle Tap in derived class
+    /// Override this method to handle Tap in derived class
     open func doHandleTapBlock(buffer: AVAudioPCMBuffer, at time: AVAudioTime) {}
 
     /// Remove the tap on the input
@@ -116,6 +113,12 @@ open class BaseTap {
             Log("The tapped node isn't attached to the engine")
             return
         }
+        // `removeTap` will internally call pending callbacks.
+        // This will call `handleBlock` from inside of the lock
+        // which will result in another lock and therefore deadlock.
+        // Since we are removing the tap,
+        // we are not interested in callbacks anymore.
+        handleBlock = nil
         input.avAudioNode.removeTap(onBus: bus)
     }
 

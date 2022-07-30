@@ -11,11 +11,16 @@ import AVFoundation
 public final class MultiChannelInputNodeTap {
     /// a file name and its associated input channel
     public struct FileChannel {
-        var name: String
-        var channel: Int32
+        public var name: String
+        public var channel: Int32
+
+        public init(name: String, channel: Int32) {
+            self.name = name
+            self.channel = channel
+        }
     }
 
-    /// Receive update events during the lifecyle of this class
+    /// Receive update events during the lifecycle of this class
     public weak var delegate: MultiChannelInputNodeTapDelegate?
 
     /// A simple name and channel pair for each channel being recorded
@@ -214,9 +219,7 @@ public final class MultiChannelInputNodeTap {
     /// Convenience function for testing
     public func prepare(channelMap: [Int32]) {
         let fileChannels = channelMap.map {
-            MultiChannelInputNodeTap.FileChannel(
-                name: "Audio \($0 + 1)",
-                channel: $0)
+            MultiChannelInputNodeTap.FileChannel(name: "Audio \($0 + 1)", channel: $0)
         }
         prepare(fileChannels: fileChannels)
     }
@@ -425,7 +428,7 @@ public final class MultiChannelInputNodeTap {
     }
 }
 
-/// Delegate for the Mutli-Channel Input Node Tap
+/// Delegate for the Multi-Channel Input Node Tap
 public protocol MultiChannelInputNodeTapDelegate: AnyObject {
     /// Sent when the tap is installed on the inputNode
     func tapInstalled(sender: MultiChannelInputNodeTap)

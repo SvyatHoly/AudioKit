@@ -17,7 +17,7 @@ public class PlaygroundOscillator: Node {
                 // Get signal value for this frame at time.
                 let index = Int(self.currentPhase / twoPi * Float(self.waveform!.count))
                 let value = self.waveform![index] * self.amplitude
-                
+
                 // Advance the phase for the next frame.
                 self.currentPhase += phaseIncrement
                 if self.currentPhase >= twoPi { self.currentPhase -= twoPi }
@@ -26,6 +26,13 @@ public class PlaygroundOscillator: Node {
                 for buffer in ablPointer {
                     let buf: UnsafeMutableBufferPointer<Float> = UnsafeMutableBufferPointer(buffer)
                     buf[frame] = value
+                }
+            }
+        } else {
+            for frame in 0..<Int(frameCount) {
+                for buffer in ablPointer {
+                    let buf: UnsafeMutableBufferPointer<Float> = UnsafeMutableBufferPointer(buffer)
+                    buf[frame] = 0
                 }
             }
         }

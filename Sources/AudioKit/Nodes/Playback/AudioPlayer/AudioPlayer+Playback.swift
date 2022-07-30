@@ -14,15 +14,9 @@ extension AudioPlayer {
                      to endTime: TimeInterval? = nil,
                      at when: AVAudioTime? = nil,
                      completionCallbackType: AVAudioPlayerNodeCompletionCallbackType = .dataPlayedBack) {
-        
-        if isPaused {
-            resume()
-            return
-        }
 
-        if isPlaying {
-            stop()
-        }
+        editStartTime = startTime ?? editStartTime
+        editEndTime = endTime ?? editEndTime
 
         guard let engine = playerNode.engine else {
             Log("🛑 Error: AudioPlayer must be attached before playback.", type: .error)
@@ -34,51 +28,66 @@ extension AudioPlayer {
             return
         }
 
-        if when != nil {
-            scheduleTime = nil
-            playerNode.stop()
+        if let renderTime = self.playerNode.lastRenderTime, let whenTime = when {
+            timeBeforePlay = whenTime.timeIntervalSince(otherTime: renderTime) ?? 0.0
         }
 
-        editStartTime = startTime ?? editStartTime
-        editEndTime = endTime ?? editEndTime
-
-        if !isScheduled || isSeeking {
+        switch status {
+        case .stopped:
             schedule(at: when,
                      completionCallbackType: completionCallbackType)
-        }
 
-        playerNode.play()
-        isPlaying = true
+            playerNode.play()
+            status = .playing
+        case .playing:
+            // player is already playing
+            return
+        case .paused:
+            resume()
+        case .scheduling:
+            // player is already scheduling
+            return
+        }
     }
 
     /// Pauses audio player. Calling play() will resume from the paused time.
     public func pause() {
-        guard isPlaying, !isPaused else { return }
+        guard status == .playing else { return }
         pausedTime = getCurrentTime()
         playerNode.pause()
-        isPaused = true
+        status = .paused
     }
     
     /// Resumes audio player from paused time
     public func resume() {
-        isPaused = false
-        if !isBuffered {
-            seek(time: pausedTime)
-        }
         playerNode.play()
+        status = .playing
     }
 
     /// Gets the accurate playhead time regardless of seeking and pausing
     /// Can't be relied on if playerNode has its playstate modified directly
     public func getCurrentTime() -> TimeInterval {
-        if let nodeTime = playerNode.lastRenderTime,
-           nodeTime.isSampleTimeValid,
-           let playerTime = playerNode.playerTime(forNodeTime: nodeTime) {
-            return (Double(playerTime.sampleTime) / playerTime.sampleRate) + editStartTime
-        } else if isPaused {
+        switch status {
+        case .playing:
+            if let nodeTime = playerNode.lastRenderTime,
+               nodeTime.isSampleTimeValid,
+               let playerTime = playerNode.playerTime(forNodeTime: nodeTime) {
+               let currTime = Double(playerTime.sampleTime) / playerTime.sampleRate
+
+                // Don't count time before file starts playing
+                if currTime < timeBeforePlay {
+                    return editStartTime
+                } else {
+                    return currTime + editStartTime - timeBeforePlay
+                }
+            } else {
+                return editStartTime
+            }
+        case .paused:
             return pausedTime
+        default:
+            return editStartTime
         }
-        return editStartTime
     }
 
     /// Sets the player's audio file to a certain time in the track (in seconds)
@@ -86,26 +95,23 @@ extension AudioPlayer {
     /// - Parameters:
     ///   - time seconds into the audio file to set playhead
     public func seek(time: TimeInterval) {
-        let wasPlaying = isPlaying
+        let time = time.clamped(to: 0...duration)
 
-        let time = (0 ... duration).clamp(time)
-
-        isSeeking = true
-
-        if wasPlaying {
+        if status == .playing {
+            isSeeking = true
+            stop()
             play(from: time, to: duration)
+            isSeeking = false
         } else {
             editStartTime = time
             editEndTime = duration
         }
-
-        isSeeking = false
     }
 }
 
 extension AudioPlayer {
     /// Synonym for isPlaying
-    public var isStarted: Bool { isPlaying }
+    public var isStarted: Bool { status == .playing }
 
     /// Synonym for play()
     public func start() {
@@ -114,11 +120,9 @@ extension AudioPlayer {
 
     /// Stop audio player. This won't generate a callback event
     public func stop() {
-        guard isPlaying else { return }
+        guard status == .playing else { return }
         pausedTime = getCurrentTime()
-        isPlaying = false
-        isSeeking = false
+        status = .stopped
         playerNode.stop()
-        scheduleTime = nil
     }
 }

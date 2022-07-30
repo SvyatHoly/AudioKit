@@ -10,7 +10,7 @@ extension AudioPlayer {
     ///   - completionCallbackType: Constants that specify when the completion handler must be invoked.
     public func schedule(at when: AVAudioTime? = nil,
                          completionCallbackType: AVAudioPlayerNodeCompletionCallbackType = .dataPlayedBack) {
-        scheduleTime = when ?? AVAudioTime.now()
+        status = .scheduling
 
         if isBuffered {
             updateBuffer()
@@ -23,7 +23,6 @@ extension AudioPlayer {
 
         } else {
             Log("The player needs a file or a valid buffer to schedule", type: .error)
-            scheduleTime = nil
         }
     }
 
@@ -56,10 +55,14 @@ extension AudioPlayer {
                                    frameCount: frameCount,
                                    at: audioTime,
                                    completionCallbackType: completionCallbackType) { callbackType in
-            self.internalCompletionHandler()
+            if self.isSeeking { return }
+            DispatchQueue.main.async {
+                self.internalCompletionHandler()
+            }
         }
 
         playerNode.prepare(withFrameCount: frameCount)
+        self.status = .stopped
     }
 
     private func scheduleBuffer(at audioTime: AVAudioTime?,
@@ -85,7 +88,10 @@ extension AudioPlayer {
                                   at: audioTime,
                                   options: bufferOptions,
                                   completionCallbackType: completionCallbackType) { callbackType in
-            self.internalCompletionHandler()
+            if self.isSeeking { return }
+            DispatchQueue.main.async {
+                self.internalCompletionHandler()
+            }
         }
 
         playerNode.prepare(withFrameCount: buffer.frameLength)

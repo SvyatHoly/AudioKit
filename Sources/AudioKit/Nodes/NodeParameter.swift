@@ -65,9 +65,9 @@ public class NodeParameter {
             if let avAudioUnit = avAudioNode as? AVAudioUnit {
                 AudioUnitSetParameter(avAudioUnit.audioUnit,
                                       param: AudioUnitParameterID(def.address),
-                                      to: range.clamp(newValue))
+                                      to: newValue.clamped(to: range))
             }
-            parameter.value = range.clamp(newValue)
+            parameter.value = newValue.clamped(to: range)
         }
     }
 
@@ -106,11 +106,11 @@ public class NodeParameter {
     public func ramp(to value: AUValue, duration: Float, delay: Float = 0) {
         var delaySamples = AUAudioFrameCount(delay * Float(Settings.sampleRate))
         if delaySamples > 4096 {
-            print("Warning: delay longer than 4096, setting to to 4096")
+            Log("Warning: delay longer than 4096, setting to to 4096")
             delaySamples = 4096
         }
         if !parameter.flags.contains(.flag_CanRamp) {
-            print("Error: can't ramp parameter \(parameter.displayName)")
+            Log("Error: can't ramp parameter \(parameter.displayName)", type: .error)
             return
         }
         assert(delaySamples < 4096)
@@ -118,7 +118,7 @@ public class NodeParameter {
         paramBlock(AUEventSampleTimeImmediate + Int64(delaySamples),
                    AUAudioFrameCount(duration * Float(Settings.sampleRate)),
                    parameter.address,
-                   range.clamp(value))
+                   value.clamped(to: range))
     }
 
     private var parameterObserverToken: AUParameterObserverToken?
@@ -212,7 +212,7 @@ extension Bool: NodeParameterType {
 }
 
 extension AUValue: NodeParameterType {
-    /// Conver to AUValue
+    /// Convert to AUValue
     /// - Returns: Value of type AUValue
     public func toAUValue() -> AUValue {
         self

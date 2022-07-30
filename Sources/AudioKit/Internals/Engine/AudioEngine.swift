@@ -5,7 +5,7 @@ import AVFoundation
 extension AVAudioNode {
 
     /// Disconnect without breaking other connections.
-    func disconnect(input: AVAudioNode) {
+    func disconnect(input: AVAudioNode, format: AVAudioFormat) {
 
         if let engine = engine {
 
@@ -23,14 +23,14 @@ extension AVAudioNode {
                 if connections.isEmpty {
                     engine.disconnectNodeOutput(node)
                 } else {
-                    engine.connect(node, to: connections, fromBus: 0, format: Settings.audioFormat)
+                    engine.connect(node, to: connections, fromBus: 0, format: format)
                 }
             }
         }
     }
 
     /// Make a connection without breaking other connections.
-    func connect(input: AVAudioNode, bus: Int, format: AVAudioFormat? = Settings.audioFormat) {
+    func connect(input: AVAudioNode, bus: Int, format: AVAudioFormat) {
         if let engine = engine {
             var points = engine.outputConnectionPoints(for: input, outputBus: 0)
             if points.contains(where: {
@@ -44,7 +44,7 @@ extension AVAudioNode {
 
 extension AVAudioMixerNode {
     /// Make a connection without breaking other connections.
-    public func connectMixer(input: AVAudioNode, format: AVAudioFormat? = Settings.audioFormat) {
+    public func connectMixer(input: AVAudioNode, format: AVAudioFormat) {
         if let engine = engine {
             var points = engine.outputConnectionPoints(for: input, outputBus: 0)
             if points.contains(where: { $0.node === self }) { return }
@@ -70,6 +70,9 @@ public class AudioEngine {
         var isNotConnected = true
 
         func connect(to engine: AudioEngine) {
+            Settings.audioFormat = AVAudioFormat(standardFormatWithSampleRate:
+                                                    engine.avEngine.inputNode.inputFormat(forBus: 0)
+                                                    .sampleRate, channels: 2) ?? AVAudioFormat()
             engine.avEngine.attach(avAudioNode)
             engine.avEngine.connect(engine.avEngine.inputNode, to: avAudioNode, format: nil)
         }
@@ -83,7 +86,7 @@ public class AudioEngine {
     /// can cause the AVAudioEngine to stop running.
     public var input: InputNode? {
         if #available(macOS 10.14, *) {
-            guard Bundle.main.object(forInfoDictionaryKey: "NSMicrophoneUsageDescription") != nil else {
+            guard avEngine.isInManualRenderingMode || Bundle.main.object(forInfoDictionaryKey: "NSMicrophoneUsageDescription") != nil else {
                 Log("To use the microphone, you must include the NSMicrophoneUsageDescription in your Info.plist", type: .error)
                 return nil
             }
@@ -105,11 +108,11 @@ public class AudioEngine {
             let wasRunning = avEngine.isRunning
             if wasRunning { stop() }
 
-            // remove the exisiting node if it is present
+            // remove the existing node if it is present
             if let node = oldValue {
                 mainMixerNode?.removeInput(node)
                 node.detach()
-                avEngine.outputNode.disconnect(input: node.avAudioNode)
+                avEngine.outputNode.disconnect(input: node.avAudioNode, format: node.outputFormat)
             }
 
             // if non nil, set the main output now
@@ -146,7 +149,7 @@ public class AudioEngine {
 
     private func removeEngineMixer() {
         guard let mixer = mainMixerNode else { return }
-        avEngine.outputNode.disconnect(input: mixer.avAudioNode)
+        avEngine.outputNode.disconnect(input: mixer.avAudioNode, format: mixer.outputFormat)
         mixer.removeAllInputs()
         mixer.detach()
         mainMixerNode = nil
@@ -236,6 +239,26 @@ public class AudioEngine {
         return buffer
     }
 
+    /// Find an Audio Unit on the system by name and load it.
+    /// Make sure to do this before the engine is running to avoid blocking.
+    /// - Parameter named: Display name of the Audio Unit
+    /// - Returns: The Audio Unit's AVAudioUnit
+    public func findAudioUnit(named: String) -> AVAudioUnit? {
+        var foundAU: AVAudioUnit?
+        let allComponents = AVAudioUnitComponentManager().components(matching: AudioComponentDescription())
+        for component in allComponents where component.name == named {
+            AVAudioUnit.instantiate(with: component.audioComponentDescription) { theAudioUnit, _ in
+                if let newAU = theAudioUnit {
+                    foundAU = newAU
+                } else {
+                    Log("🛑 Failed to load Audio Unit named: \(named)")
+                }
+            }
+        }
+        if foundAU == nil { Log("🛑 Failed to find Audio Unit named: \(named)") }
+        return foundAU
+    }
+
     /// Enumerate the list of available input devices.
     public static var inputDevices: [Device] {
         #if os(macOS)
@@ -276,14 +299,7 @@ public class AudioEngine {
         }
         #else
         let devs = AVAudioSession.sharedInstance().currentRoute.outputs
-        if devs.isNotEmpty {
-            var outs = [Device]()
-            for dev in devs {
-                outs.append(Device(name: dev.portName, deviceID: dev.uid))
-            }
-            return outs
-        }
-        return []
+        return devs.map { Device(name: $0.portName, deviceID: $0.uid) }
         #endif
     }
 
@@ -312,7 +328,7 @@ public class AudioEngine {
     public static func setInputDevice(_ input: Device) throws {
         // Set the port description first eg iPhone Microphone / Headset Microphone etc
         guard let portDescription = input.portDescription else {
-            throw CommonError.DeviceNotFound
+            throw CommonError.deviceNotFound
         }
         try AVAudioSession.sharedInstance().setPreferredInput(portDescription)
 
@@ -325,15 +341,9 @@ public class AudioEngine {
 
     /// The current input device, if available.
     public var inputDevice: Device? {
-        if let portDescription = AVAudioSession.sharedInstance().preferredInput {
+        let session = AVAudioSession.sharedInstance()
+        if let portDescription = session.preferredInput ?? session.currentRoute.inputs.first {
             return Device(portDescription: portDescription)
-        } else {
-            let inputDevices = AVAudioSession.sharedInstance().currentRoute.inputs
-            if inputDevices.isNotEmpty {
-                for device in inputDevices {
-                    return Device(portDescription: device)
-                }
-            }
         }
         return nil
     }
@@ -341,10 +351,7 @@ public class AudioEngine {
     /// The current output device, if available.
     public var outputDevice: Device? {
         let devs = AVAudioSession.sharedInstance().currentRoute.outputs
-        if devs.isNotEmpty {
-            return Device(name: devs[0].portName, deviceID: devs[0].uid)
-        }
-        return nil
+        return devs.first.map { Device(name: $0.portName, deviceID: $0.uid) }
     }
     #endif
 

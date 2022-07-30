@@ -139,7 +139,7 @@ open class MusicTrackManager {
     /// Set loop info
     ///
     /// - parameter duration: How long the loop will last, from the end of the track backwards
-    /// - parameter loopCount: how many times to loop. 0 is infinte
+    /// - parameter loopCount: how many times to loop. 0 is infinite
     ///
     public func setLoopInfo(_ duration: Duration, loopCount: Int) {
         let size: UInt32 = UInt32(MemoryLayout<MusicTrackLoopInfo>.size)
@@ -212,7 +212,7 @@ open class MusicTrackManager {
                                                &eventDataSize)
 
                 if eventType == kMusicEventType_MIDINoteMessage {
-                    let data = UnsafePointer<MIDINoteMessage>(eventData?.assumingMemoryBound(to: MIDINoteMessage.self))
+                    let data = eventData?.bindMemory(to: MIDINoteMessage.self, capacity: 1)
 
                     guard let channel = data?.pointee.channel,
                         let note = data?.pointee.note,
@@ -457,7 +457,7 @@ open class MusicTrackManager {
     ///
     public func replaceMIDINoteData(with trackMIDINoteData: [MIDINoteData]) {
         clearRange(start: Duration(beats: 0), duration: Duration(beats: length))
-        trackMIDINoteData.forEach { add(midiNoteData: $0) }
+        for data in trackMIDINoteData { add(midiNoteData: data) }
     }
 
     /// Add Controller change to sequence
@@ -604,7 +604,7 @@ open class MusicTrackManager {
 
         MusicTrackManager.iterateMusicTrack(track) { _, eventTime, eventType, eventData, _, _ in
             guard eventType == kMusicEventType_MIDINoteMessage else { return }
-            let data = UnsafePointer<MIDINoteMessage>(eventData?.assumingMemoryBound(to: MIDINoteMessage.self))
+            let data = eventData?.bindMemory(to: MIDINoteMessage.self, capacity: 1)
 
             guard let channel = data?.pointee.channel,
                 let note = data?.pointee.note,
@@ -715,7 +715,7 @@ open class MusicTrackManager {
         DisposeMusicEventIterator(iterator)
     }
 
-    /// Set the MIDI Ouput
+    /// Set the MIDI Output
     ///
     /// - parameter endpoint: MIDI Endpoint Port
     ///

@@ -22,7 +22,7 @@ public typealias MIDIVelocity = UInt8
 /// MIDI Type Alias making it clear that you're working with MIDI
 public typealias MIDIChannel = UInt8
 
-/// Sample type alias making it clear when you're workin with samples
+/// Sample type alias making it clear when you're working with samples
 public typealias SampleIndex = UInt32
 
 /// Note on shortcut
@@ -65,7 +65,7 @@ extension AUValue {
     ///
     /// - Parameters:
     ///   - to: Source range (cannot include zero if taper is not positive)
-    ///   - taper:Must be a postive number, taper = 1 is linear
+    ///   - taper:Must be a positive number, taper = 1 is linear
     ///
     public func normalized(from range: ClosedRange<AUValue>, taper: AUValue = 1) -> AUValue {
         assert(taper > 0, "Cannot have non-positive taper.")
@@ -136,20 +136,10 @@ extension RangeReplaceableCollection where Iterator.Element: ExpressibleByIntege
     }
 }
 
-extension ClosedRange {
-    /// Clamp value to the range
-    /// - parameter value: Value to clamp
-    public func clamp(_ value: Bound) -> Bound {
-        return Swift.min(Swift.max(value, lowerBound), upperBound)
-    }
-}
-
 extension Sequence where Iterator.Element: Hashable {
     internal var unique: [Iterator.Element] {
         var s: Set<Iterator.Element> = []
-        return filter {
-            s.insert($0).inserted
-        }
+        return filter { s.insert($0).inserted }
     }
 }
 
@@ -224,7 +214,7 @@ extension AVAudioSession.CategoryOptions: Occupiable {}
 #endif
 
 extension Sequence where Self.Element: Equatable {
-    /// Easer to read alternative to !contains
+    /// Easier to read alternative to !contains
     @inline(__always)
     public func doesNotContain(_ member: Element) -> Bool {
         return !contains(member)
@@ -412,5 +402,18 @@ public extension DSPSplitComplex {
         imagp.assign(from: imag, count: imag.count)
 
         self.init(realp: realp, imagp: imagp)
+    }
+
+    func deallocate() {
+        realp.deallocate()
+        imagp.deallocate()
+    }
+}
+
+public extension AVAudioTime {
+    /// Returns an AVAudioTime set to sampleTime of zero at the default sample rate
+    static func sampleTimeZero(sampleRate: Double = Settings.sampleRate) -> AVAudioTime {
+        let sampleTime = AVAudioFramePosition(Double(0))
+        return AVAudioTime(sampleTime: sampleTime, atRate: sampleRate)
     }
 }

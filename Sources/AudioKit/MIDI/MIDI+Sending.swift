@@ -10,7 +10,7 @@ private let sizeOfMIDIPacket = MemoryLayout<MIDIPacket>.size
 
 /// The `MIDIPacketList` struct consists of two fields, numPackets(`UInt32`) and
 /// packet(an Array of 1 instance of `MIDIPacket`). The packet is supposed to be a "An open-ended
-/// array of variable-length MIDIPackets." but for convenience it is instaciated with
+/// array of variable-length MIDIPackets." but for convenience it is instantiated with
 /// one instance of a `MIDIPacket`. To figure out the size of the header portion of this struct,
 /// we can get the size of a UInt32, or subtract the size of a single packet from the size of a
 /// packet list. I opted for the latter.
@@ -18,7 +18,7 @@ private let sizeOfMIDIPacketListHeader = sizeOfMIDIPacketList - sizeOfMIDIPacket
 
 /// The MIDIPacket struct consists of a timestamp (`MIDITimeStamp`), a length (`UInt16`) and
 /// data (an Array of 256 instances of `Byte`). The data field is supposed to be a "A variable-length
-/// stream of MIDI messages." but for convenience it is instaciated as 256 bytes. To figure out the
+/// stream of MIDI messages." but for convenience it is instantiated as 256 bytes. To figure out the
 /// size of the header portion of this struct, we can add the size of the `timestamp` and `length`
 /// fields, or subtract the size of the 256 `Byte`s from the size of the whole packet. I opted for
 /// the former.
@@ -70,6 +70,12 @@ extension Collection where Iterator.Element == MIDIEndpointRef {
             getMIDIObjectIntegerProperty(ref: $0, property: kMIDIPropertyUniqueID)
         }
     }
+    
+    var endpointRefs: [MIDIEndpointRef] {
+        return map {
+            $0
+        }
+    }
 }
 
 internal func getMIDIObjectStringProperty(ref: MIDIObjectRef, property: CFString) -> String {
@@ -111,6 +117,16 @@ extension MIDI {
             names.removeAll(where: { $0 == virtualName})
         }
         return names
+    }
+    
+    /// Array of destination endpoint references
+    public var destinationRefs: [MIDIEndpointRef] {
+        var refs = MIDIDestinations().endpointRefs
+        // Remove outputs which are actually virtual inputs to AudioKit
+        for output in self.virtualInputs {
+            refs.removeAll(where: { $0 == output })
+        }
+        return refs
     }
 
     /// Lookup a destination name from its unique id
@@ -186,7 +202,8 @@ extension MIDI {
             outputPort = tempPort
         }
 
-        let destinations = MIDIDestinations()
+        // Since destinationUIDs filters out our own virtual inputs, we need to do the same with the endpoint refs.
+        let destinations = destinationRefs
 
         // To get all endpoints; and set in endpoints array (mapping without condition)
         if outputUid == 0 {
@@ -252,77 +269,12 @@ extension MIDI {
         }
     }
 
-    /// Send Message with data
-    /// - Parameters:
-    ///   - data: Array of MIDI Bytes
-    ///   - offset: Timestamp offset
-    public func sendMessage(_ data: [MIDIByte],
-                            offset: MIDITimeStamp = 0,
-                            endpointsUIDs: [MIDIUniqueID]? = nil,
-                            virtualOutputPorts: [MIDIPortRef]? = nil) {
-
-        // Create a buffer that is big enough to hold the data to be sent and
-        // all the necessary headers.
-        let bufferSize = data.count + sizeOfMIDICombinedHeaders
-
-        // the discussion section of MIDIPacketListAdd states that "The maximum
-        // size of a packet list is 65536 bytes." Checking for that limit here.
-        if bufferSize > 65_536 {
-            Log("error sending midi : data array is too large, requires a buffer larger than 65536",
-                  log: OSLog.midi,
-                  type: .error)
-            return
-        }
-
-        var buffer = Data(count: bufferSize)
-
-        // Use Data (a.k.a NSData) to create a block where we have access to a
-        // pointer where we can create the packetlist and send it. No need for
-        // explicit alloc and dealloc.
-        buffer.withUnsafeMutableBytes { (ptr: UnsafeMutableRawBufferPointer) -> Void in
-            if let packetListPointer = ptr.bindMemory(to: MIDIPacketList.self).baseAddress {
-
-                let packet = MIDIPacketListInit(packetListPointer)
-                let nextPacket: UnsafeMutablePointer<MIDIPacket>? =
-                    MIDIPacketListAdd(packetListPointer, bufferSize, packet, offset, data.count, data)
-
-                // I would prefer stronger error handling here, perhaps throwing
-                // to force the app developer to handle the error.
-                if nextPacket == nil {
-                    Log("error sending midi: Failed to add packet to packet list.", log: OSLog.midi, type: .error)
-                    return
-                }
-
-                var endpointsRef: [MIDIEndpointRef] = []
-
-                if let endpointsUIDS = endpointsUIDs {
-                    for endpointUID in endpointsUIDS {
-                        if let endpoint = endpoints[endpointUID] {endpointsRef.append(endpoint)}
-                    }
-                } else {
-                    endpointsRef = Array(endpoints.values)
-                }
-
-                for endpoint in endpointsRef {
-                    let result = MIDISend(outputPort, endpoint, packetListPointer)
-                    if result != noErr {
-                        Log("error sending midi: \(result)", log: OSLog.midi, type: .error)
-                    }
-                }
-
-                if virtualOutputs != [0] {
-                    virtualOutputPorts?.forEach {MIDIReceived($0, packetListPointer)}
-                }
-            }
-        }
-    }
-
     /// Clear MIDI destinations
     public func clearEndpoints() {
         endpoints.removeAll()
     }
 
-    /// Send Messsage from MIDI event data
+    /// Send Message from MIDI event data
     /// - Parameter event: Event so send
     public func sendEvent(_ event: MIDIEvent,
                           endpointsUIDs: [MIDIUniqueID]? = nil,
@@ -335,29 +287,31 @@ extension MIDI {
     ///   - noteNumber: MIDI Note Number
     ///   - velocity: MIDI Velocity
     ///   - channel: MIDI Channel (default: 0)
+    ///   - time: MIDI Timestamp (default: mach_absolute_time(), note: time should never be 0)
     public func sendNoteOnMessage(noteNumber: MIDINoteNumber,
                                   velocity: MIDIVelocity,
                                   channel: MIDIChannel = 0,
+                                  time: MIDITimeStamp = mach_absolute_time(),
                                   endpointsUIDs: [MIDIUniqueID]? = nil,
                                   virtualOutputPorts: [MIDIPortRef]? = nil) {
         let noteCommand: MIDIByte = noteOnByte + channel
         let message: [MIDIByte] = [noteCommand, noteNumber, velocity]
-        self.sendMessage(message, endpointsUIDs: endpointsUIDs, virtualOutputPorts: virtualOutputPorts)
+        self.sendMessage(message, time: time, endpointsUIDs: endpointsUIDs, virtualOutputPorts: virtualOutputPorts)
     }
 
     /// Send a Note Off Message
     /// - Parameters:
     ///   - noteNumber: MIDI Note Number
-    ///   - velocity: MIDI Velocity
     ///   - channel: MIDI Channel (default: 0)
+    ///   - time: MIDI Timestamp (default: mach_absolute_time(), note: time should never be 0)
     public func sendNoteOffMessage(noteNumber: MIDINoteNumber,
-                                   velocity: MIDIVelocity,
                                    channel: MIDIChannel = 0,
+                                   time: MIDITimeStamp = mach_absolute_time(),
                                    endpointsUIDs: [MIDIUniqueID]? = nil,
                                    virtualOutputPorts: [MIDIPortRef]? = nil) {
         let noteCommand: MIDIByte = noteOffByte + channel
-        let message: [MIDIByte] = [noteCommand, noteNumber, velocity]
-        self.sendMessage(message, endpointsUIDs: endpointsUIDs, virtualOutputPorts: virtualOutputPorts)
+        let message: [MIDIByte] = [noteCommand, noteNumber, 0]
+        self.sendMessage(message, time: time, endpointsUIDs: endpointsUIDs, virtualOutputPorts: virtualOutputPorts)
     }
 
     /// Send a Continuous Controller message
@@ -394,52 +348,14 @@ extension MIDI {
 
     // MARK: - Expand api to include MIDITimeStamp
 
-    /// Send a message with MIDITimeStamp
-    /// - Parameters:
-    ///   - noteNumber: MIDI Note Number
-    ///   - velocity: MIDI Velocity
-    ///   - channel: MIDI Channel (default: 0)
-    ///   - time: MIDI Timestamp (default: 0)
-    public func sendNoteOnMessageWithTime(noteNumber: MIDINoteNumber,
-                                          velocity: MIDIVelocity,
-                                          channel: MIDIChannel = 0,
-                                          time: MIDITimeStamp = 0,
-                                          endpointsUIDs: [MIDIUniqueID]? = nil,
-                                          virtualOutputPorts: [MIDIPortRef]? = nil) {
-        let noteCommand: MIDIByte = noteOnByte + channel
-        let message: [MIDIByte] = [noteCommand, noteNumber, velocity]
-        self.sendMessageWithTime(message, time: time,
-                                 endpointsUIDs: endpointsUIDs,
-                                 virtualOutputPorts: virtualOutputPorts)
-    }
-
-    /// Send a Note Off Message with timestamp
-    /// - Parameters:
-    ///   - noteNumber: MIDI Note Number
-    ///   - velocity: MIDI Velocity
-    ///   - channel: MIDI Channel (default: 0)
-    ///   - time: MIDI Timestamp (default: 0)
-    public func sendNoteOffMessageWithTime(noteNumber: MIDINoteNumber,
-                                           velocity: MIDIVelocity,
-                                           channel: MIDIChannel = 0,
-                                           time: MIDITimeStamp = 0,
-                                           endpointsUIDs: [MIDIUniqueID]? = nil,
-                                           virtualOutputPorts: [MIDIPortRef]? = nil) {
-        let noteCommand: MIDIByte = noteOffByte + channel
-        let message: [MIDIByte] = [noteCommand, noteNumber, velocity]
-        self.sendMessageWithTime(message, time: time,
-                                 endpointsUIDs: endpointsUIDs,
-                                 virtualOutputPorts: virtualOutputPorts)
-    }
-
     /// Send Message with data with timestamp
     /// - Parameters:
     ///   - data: Array of MIDI Bytes
-    ///   - time: MIDI Timestamp
-    public func sendMessageWithTime(_ data: [MIDIByte],
-                                    time: MIDITimeStamp,
-                                    endpointsUIDs: [MIDIUniqueID]? = nil,
-                                    virtualOutputPorts: [MIDIPortRef]? = nil) {
+    ///   - time: MIDI Timestamp (default: mach_absolute_time(), note: time should never be 0)
+    public func sendMessage(_ data: [MIDIByte],
+                            time: MIDITimeStamp = mach_absolute_time(),
+                            endpointsUIDs: [MIDIUniqueID]? = nil,
+                            virtualOutputPorts: [MIDIPortRef]? = nil) {
         let packetListPointer: UnsafeMutablePointer<MIDIPacketList> = UnsafeMutablePointer.allocate(capacity: 1)
 
         var packet: UnsafeMutablePointer<MIDIPacket> = MIDIPacketListInit(packetListPointer)
